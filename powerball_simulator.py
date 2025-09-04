@@ -1,4 +1,221 @@
-import streamlit as st
+# 게임 플레이 버튼
+if play_mode == "단일 게임":
+    if st.button("🎯 게임 플레이 ($2)", type="primary", use_container_width=True):
+        # 기존 단일 게임 로직
+        if number_method == "직접 선택":
+            if len(set(main_numbers)) != 5:
+                st.error("메인 번호 5개는 모두 다른 숫자여야 합니다!")
+            elif any(num < 1 or num > 69 for num in main_numbers):
+                st.error("메인 번호는 1-69 사이여야 합니다!")
+            elif powerball_number < 1 or powerball_number > 26:
+                st.error("파워볼 번호는 1-26 사이여야 합니다!")
+            else:
+                valid_numbers = True
+        else:
+            valid_numbers = True
+        
+        if valid_numbers:
+            # 단일 게임 실행
+            play_single_game(main_numbers, powerball_number)
+
+else:  # 자동 플레이 모드
+    if st.button("🚀 자동 플레이 시작", type="primary", use_container_width=True):
+        # 자동 플레이 실행
+        if auto_mode == "특정 등수 당첨까지":
+            play_auto_until_prize(target_prize, max_games, auto_number_method, 
+                                fixed_main_numbers if auto_number_method == "고정 번호 사용" else None,
+                                fixed_powerball if auto_number_method == "고정 번호 사용" else None)
+        elif auto_mode == "정해진 횟수만큼":
+            play_auto_fixed_games(fixed_games, auto_number_method,
+                                fixed_main_numbers if auto_number_method == "고정 번호 사용" else None,
+                                fixed_powerball if auto_number_method == "고정 번호 사용" else None)
+        else:  # 잭팟까지
+            play_auto_until_jackpot(max_games, auto_number_method,
+                                  fixed_main_numbers if auto_number_method == "고정 번호 사용" else None,
+                                  fixed_powerball if auto_number_method == "고정 번호 사용" else None)
+
+# 게임 실행 함수들
+def play_single_game(main_numbers, powerball_number):
+    """단일 게임 실행"""
+    # 당첨 번호 생성
+    winning_main, winning_powerball = generate_winning_numbers()
+    
+    # 당첨 확인
+    prize_level = check_winning(main_numbers, powerball_number, winning_main, winning_powerball)
+    
+    # 상금 계산
+    prize_amount = calculate_prize(prize_level) if prize_level else 0
+    
+    # 다른 당첨자 확인
+    other_winner = simulate_other_winners(st.session_state.current_jackpot, st.session_state.games_since_jackpot)
+    
+    # 세션 상태 업데이트
+    st.session_state.total_spent += 2
+    st.session_state.total_winnings += prize_amount
+    st.session_state.games_played += 1
+    
+    # 잭팟 업데이트
+    if prize_level == 'jackpot' or other_winner:
+        if other_winner and prize_level != 'jackpot':
+            st.warning("🎰 **다른 당첨자가 나타났습니다!** 잭팟이 초기화됩니다.")
+        st.session_state.current_jackpot = 20000000  # 잭팟 리셋
+        st.session_state.games_since_jackpot = 0
+    else:
+        # 잭팟 증가
+        jackpot_increase = calculate_jackpot_increase(
+            st.session_state.current_jackpot, 
+            st.session_state.games_since_jackpot
+        )
+        st.session_state.current_jackpot += jackpot_increase
+        st.session_state.games_since_jackpot += 1
+    
+    # 게임 히스토리 추가
+    game_record = {
+        'game_number': st.session_state.games_played,
+        'timestamp': datetime.now(),
+        'user_numbers': main_numbers.copy(),
+        'user_powerball': powerball_number,
+        'winning_numbers': winning_main.copy(),
+        'winning_powerball': winning_powerball,
+        'prize_level': prize_level,
+        'prize_amount': prize_amount,
+        'other_winner': other_winner
+    }
+    st.session_state.game_history.append(game_record)
+    
+    # 결과 표시
+    display_game_result(main_numbers, powerball_number, winning_main, winning_powerball, 
+                       prize_level, prize_amount, other_winner)
+
+def play_auto_until_prize(target_prize, max_games, number_method, fixed_main=None, fixed_powerball=None):
+    """특정 등수 당첨까지 자동 플레이"""
+    target_levels = {
+        "9등 이상 ($4+)": ['9th', '8th', '7th', '6th', '5th', '4th', '3rd', '2nd', 'jackpot'],
+        "7등 이상 ($7+)": ['7th', '6th', '5th', '4th', '3rd', '2nd', 'jackpot'],
+        "5등 이상 ($100+)": ['5th', '4th', '3rd', '2nd', 'jackpot'],
+        "3등 이상 ($50K+)": ['3rd', '2nd', 'jackpot'],
+        "2등 이상 ($1M+)": ['2nd', 'jackpot'],
+        "1등 (잭팟)": ['jackpot']
+    }
+    
+    target_list = target_levels[target_prize]
+    games_played = 0
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    while games_played < max_games:
+        games_played += 1
+        
+        # 번호 생성
+        if number_method == "고정 번호 사용":
+            main_numbers = fixed_main
+            powerball_number = fixed_powerball
+        else:
+            main_numbers = sorted(random.sample(range(1, 70), 5))
+            powerball_number = random.randint(1, 26)
+        
+        # 게임 실행
+        winning_main, winning_powerball = generate_winning_numbers()
+        prize_level = check_winning(main_numbers, powerball_number, winning_main, winning_powerball)
+        
+        # 결과 처리
+        prize_amount = calculate_prize(prize_level) if prize_level else 0
+        other_winner = simulate_other_winners(st.session_state.current_jackpot, st.session_state.games_since_jackpot)
+        
+        # 상태 업데이트
+        st.session_state.total_spent += 2
+        st.session_state.total_winnings += prize_amount
+        st.session_state.games_played += 1
+        
+        # 잭팟 관리
+        if prize_level == 'jackpot' or other_winner:
+            st.session_state.current_jackpot = 20000000
+            st.session_state.games_since_jackpot = 0
+        else:
+            jackpot_increase = calculate_jackpot_increase(st.session_state.current_jackpot, st.session_state.games_since_jackpot)
+            st.session_state.current_jackpot += jackpot_increase
+            st.session_state.games_since_jackpot += 1
+        
+        # 진행상황 업데이트
+        progress_bar.progress(games_played / max_games)
+        status_text.text(f"진행: {games_played}/{max_games}게임 | 현재 잭팟: ${st.session_state.current_jackpot/1000000:.1f}M")
+        
+        # 목표 달성 확인
+        if prize_level in target_list:
+            st.success(f"🎊 **목표 달성!** {games_played}게임 만에 {target_prize} 당첨!")
+            st.success(f"당첨금: {format_currency(prize_amount)}")
+            break
+        
+        # 다른 당첨자로 인한 잭팟 초기화 알림
+        if other_winner:
+            st.info(f"🎰 {games_played}게임: 다른 당첨자 출현으로 잭팟 초기화")
+    
+    if games_played >= max_games:
+        st.warning(f"⏰ 최대 게임 수({max_games}게임)에 도달했습니다. 목표를 달성하지 못했습니다.")
+    
+    st.info(f"📊 자동 플레이 결과: {games_played}게임, 총 비용 ${games_played * 2:,}")
+
+def play_auto_fixed_games(game_count, number_method, fixed_main=None, fixed_powerball=None):
+    """정해진 횟수만큼 자동 플레이"""
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    best_prize = None
+    best_amount = 0
+    
+    for i in range(game_count):
+        # 번호 생성
+        if number_method == "고정 번호 사용":
+            main_numbers = fixed_main
+            powerball_number = fixed_powerball
+        else:
+            main_numbers = sorted(random.sample(range(1, 70), 5))
+            powerball_number = random.randint(1, 26)
+        
+        # 게임 실행
+        winning_main, winning_powerball = generate_winning_numbers()
+        prize_level = check_winning(main_numbers, powerball_number, winning_main, winning_powerball)
+        
+        # 결과 처리
+        prize_amount = calculate_prize(prize_level) if prize_level else 0
+        other_winner = simulate_other_winners(st.session_state.current_jackpot, st.session_state.games_since_jackpot)
+        
+        # 최고 상금 기록
+        if prize_amount > best_amount:
+            best_prize = prize_level
+            best_amount = prize_amount
+        
+        # 상태 업데이트
+        st.session_state.total_spent += 2
+        st.session_state.total_winnings += prize_amount
+        st.session_state.games_played += 1
+        
+        # 잭팟 관리
+        if prize_level == 'jackpot' or other_winner:
+            st.session_state.current_jackpot = 20000000
+            st.session_state.games_since_jackpot = 0
+        else:
+            jackpot_increase = calculate_jackpot_increase(st.session_state.current_jackpot, st.session_state.games_since_jackpot)
+            st.session_state.current_jackpot += jackpot_increase
+            st.session_state.games_since_jackpot += 1
+        
+        # 진행상황 업데이트
+        progress_bar.progress((i + 1) / game_count)
+        status_text.text(f"진행: {i + 1}/{game_count}게임 | 현재 잭팟: ${st.session_state.current_jackpot/1000000:.1f}M | 최고상금: ${best_amount:,}")
+    
+    # 결과 요약
+    st.success(f"🎯 **{game_count}게임 자동 플레이 완료!**")
+    if best_amount > 0:
+        level_names = {
+            'jackpot': '잭팟', '2nd': '2등', '3rd': '3등', '4th': '4등', 
+            '5th': '5등', '6th': '6등', '7th': '7등', '8th': '8등', '9th': '9등'
+        }
+        st.info(f"🏆 최고 당첨: {level_names.get(best_prize, '알 수 없음')} - {format_currency(best_amount)}")
+    else:
+        st.info("😅 아쉽게도 당첨되지 않았습니다.")
+    
+    total_costimport streamlit as st
 import random
 import pandas as pd
 from datetime import datetime
@@ -288,6 +505,34 @@ if st.session_state.game_history:
 # 리셋 버튼
 st.markdown("---")
 if st.button("🔄 게임 초기화", type="secondary"):
+    for key in ['total_spent', 'total_winnings', 'game_history', 'games_played', 'games_since_jackpot']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state.current_jackpot = 20000000
+    st.rerun()
+
+# 게임 히스토리 표시 (기존 코드와 동일하지만 other_winner 정보 추가)
+if st.session_state.game_history:
+    st.markdown("---")
+    st.header("📊 게임 히스토리")
+    
+    # 최근 10게임만 표시
+    recent_games = st.session_state.game_history[-10:]
+    
+    history_data = []
+    for game in reversed(recent_games):
+        other_info = " (타인당첨)" if game.get('other_winner', False) else ""
+        history_data.append({
+            '게임 번호': game['game_number'],
+            '시간': game['timestamp'].strftime("%H:%M:%S"),
+            '선택 번호': f"{sorted(game['user_numbers'])} + {game['user_powerball']}",
+            '당첨 번호': f"{game['winning_numbers']} + {game['winning_powerball']}",
+            '등수': (game['prize_level'] if game['prize_level'] else '미당첨') + other_info,
+            '상금': format_currency(game['prize_amount'])
+        })
+    
+    df = pd.DataFrame(history_data)
+    st.dataframe(df, use_container_width=True)기화", type="secondary"):
     for key in ['total_spent', 'total_winnings', 'game_history', 'games_played', 'games_since_jackpot']:
         if key in st.session_state:
             del st.session_state[key]
